@@ -1,0 +1,604 @@
+# ===============================
+# 🎵 UNIVERSAL SPOTIFY ANALYSIS
+# Works in: Kaggle, Colab, Local Jupyter
+# ===============================
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+import os
+warnings.filterwarnings('ignore')
+
+# Machine Learning Libraries
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+
+print("🎵 Universal Spotify Song Popularity Analysis")
+print("=" * 60)
+
+# ===============================
+# 📂 STEP 1: SMART DATA LOADING
+# ===============================
+
+def load_spotify_data():
+    """
+    Smart data loading that works in multiple environments
+    """
+    # Try different possible paths
+    possible_paths = [
+        # Kaggle paths
+        '/kaggle/input/spotify-popularity-songs/SpotifyMostStreamedSongs.csv',
+        '/kaggle/input/spotify-most-streamed-songs/SpotifyMostStreamedSongs.csv',
+        '/kaggle/input/spotify-tracks-dataset/SpotifyFeatures.csv',
+        '/kaggle/input/ultimate-spotify-tracks-db/SpotifyFeatures.csv',
+
+        # Google Colab paths
+        '/content/SpotifyMostStreamedSongs.csv',
+        '/content/spotify_data/SpotifyMostStreamedSongs.csv',
+
+        # Local paths
+        'SpotifyMostStreamedSongs.csv',
+        'data/SpotifyMostStreamedSongs.csv',
+        './SpotifyMostStreamedSongs.csv'
+    ]
+
+    # Try to load from each path
+    for path in possible_paths:
+        try:
+            if os.path.exists(path):
+                print(f"✅ Found dataset at: {path}")
+                df = pd.read_csv(path)
+                if len(df) > 100:  # Ensure it's a substantial dataset
+                    return df, path
+        except Exception as e:
+            continue
+
+    # If no file found, try to find any CSV in current directory
+    print("🔍 Searching for CSV files in current directory...")
+    for file in os.listdir('.'):
+        if file.endswith('.csv') and 'spotify' in file.lower():
+            try:
+                print(f"✅ Found Spotify CSV: {file}")
+                df = pd.read_csv(file)
+                if len(df) > 100:
+                    return df, file
+            except:
+                continue
+
+    # If still no file found, create sample data
+    print("❌ No Spotify dataset found.")
+    print("🔄 Creating realistic sample data for demonstration...")
+    return create_sample_spotify_data()
+
+def create_sample_spotify_data():
+    """
+    Create realistic sample Spotify data
+    """
+    np.random.seed(42)
+    n_songs = 2000
+
+    # Create realistic data
+    artists = ['Taylor Swift', 'Ed Sheeran', 'Drake', 'Ariana Grande', 'The Weeknd',
+              'Billie Eilish', 'Post Malone', 'Olivia Rodrigo', 'Dua Lipa', 'Harry Styles'] * 20
+
+    data = {
+        'track_name': [f'Song_{i}' for i in range(n_songs)],
+        'artist_name': np.random.choice(artists, n_songs),
+        'popularity': np.clip(np.random.beta(2, 5, n_songs) * 100, 0, 100),
+        'danceability': np.random.beta(2, 2, n_songs),
+        'energy': np.random.beta(2, 2, n_songs),
+        'key': np.random.randint(0, 12, n_songs),
+        'loudness': np.random.normal(-8, 4, n_songs),
+        'mode': np.random.randint(0, 2, n_songs),
+        'speechiness': np.random.beta(1, 5, n_songs),
+        'acousticness': np.random.beta(1, 3, n_songs),
+        'instrumentalness': np.random.beta(1, 10, n_songs),
+        'liveness': np.random.beta(1, 4, n_songs),
+        'valence': np.random.beta(2, 2, n_songs),
+        'tempo': np.clip(np.random.normal(120, 30, n_songs), 60, 200),
+        'duration_ms': np.clip(np.random.normal(220000, 50000, n_songs), 90000, 480000),
+        'time_signature': np.random.choice([3, 4, 5], n_songs, p=[0.1, 0.8, 0.1]),
+        'year': np.random.randint(2010, 2024, n_songs),
+        'streams': np.random.lognormal(15, 2, n_songs),
+    }
+
+    # Clean up values
+    data['loudness'] = np.clip(data['loudness'], -25, 0)
+
+    df = pd.DataFrame(data)
+    return df, "sample_data"
+
+# Load the data
+df, data_source = load_spotify_data()
+
+print(f"✅ Dataset loaded successfully!")
+print(f"📊 Source: {data_source}")
+print(f"📊 Dataset shape: {df.shape}")
+print(f"📋 Columns: {list(df.columns)}")
+
+# Display first few rows
+print("\n📖 First 5 rows:")
+try:
+    # In Kaggle/Jupyter, use display if available
+    display(df.head())
+except:
+    # In regular Python, use print
+    print(df.head())
+
+# ===============================
+# 📊 STEP 2: EXPLORATORY DATA ANALYSIS
+# ===============================
+
+print("\n" + "="*60)
+print("📊 EXPLORATORY DATA ANALYSIS")
+print("="*60)
+
+# Basic dataset information
+print(f"\n📈 Dataset Info:")
+print(f"• Total records: {len(df):,}")
+print(f"• Total columns: {len(df.columns)}")
+print(f"• Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+
+# Data types analysis
+numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+
+print(f"\n🔢 Column Types:")
+print(f"• Numeric columns ({len(numeric_cols)}): {numeric_cols}")
+print(f"• Categorical columns ({len(categorical_cols)}): {categorical_cols}")
+
+# Missing values analysis
+print(f"\n🔍 Missing Values Analysis:")
+missing_values = df.isnull().sum()
+missing_df = missing_values[missing_values > 0].sort_values(ascending=False)
+
+if len(missing_df) > 0:
+    print("Missing values found:")
+    for col, count in missing_df.items():
+        percentage = (count / len(df)) * 100
+        print(f"• {col}: {count} ({percentage:.1f}%)")
+else:
+    print("✅ No missing values found!")
+
+# Statistical summary
+print(f"\n📊 Statistical Summary for Numeric Columns:")
+if len(numeric_cols) > 0:
+    try:
+        display(df[numeric_cols].describe())
+    except:
+        print(df[numeric_cols].describe())
+
+# ===============================
+# 🎨 STEP 3: DATA VISUALIZATION
+# ===============================
+
+print(f"\n🎨 Creating comprehensive visualizations...")
+
+# Set plotting style
+plt.style.use('default')
+sns.set_palette("husl")
+
+# Create comprehensive dashboard
+fig, axes = plt.subplots(3, 3, figsize=(20, 15))
+fig.suptitle('🎵 Spotify Dataset Analysis Dashboard', fontsize=16, fontweight='bold')
+
+# Helper function to safely get columns
+def get_column_safely(df, keywords, col_list):
+    for keyword in keywords:
+        for col in col_list:
+            if keyword.lower() in col.lower():
+                return col
+    return None
+
+# Plot 1: Popularity/Target Distribution
+popularity_col = get_column_safely(df, ['popular', 'stream', 'chart'], numeric_cols)
+if popularity_col:
+    axes[0,0].hist(df[popularity_col], bins=30, alpha=0.7, color='gold', edgecolor='black')
+    axes[0,0].set_title(f'🎯 {popularity_col.title()} Distribution')
+    axes[0,0].set_xlabel(popularity_col)
+    axes[0,0].set_ylabel('Frequency')
+elif len(numeric_cols) > 0:
+    axes[0,0].hist(df[numeric_cols[0]], bins=30, alpha=0.7, color='gold', edgecolor='black')
+    axes[0,0].set_title(f'📊 {numeric_cols[0].title()} Distribution')
+
+# Plot 2: Artist/Genre Distribution
+artist_col = get_column_safely(df, ['artist', 'performer', 'singer'], categorical_cols)
+if artist_col:
+    top_artists = df[artist_col].value_counts().head(10)
+    axes[0,1].bar(range(len(top_artists)), top_artists.values, color='lightcoral')
+    axes[0,1].set_xticks(range(len(top_artists)))
+    axes[0,1].set_xticklabels(top_artists.index, rotation=45, ha='right')
+    axes[0,1].set_title(f'🎤 Top 10 {artist_col.title()}')
+    axes[0,1].set_ylabel('Count')
+else:
+    axes[0,1].text(0.5, 0.5, 'No Artist Column\nFound', ha='center', va='center',
+                   transform=axes[0,1].transAxes)
+
+# Plot 3: Audio Features
+audio_features = ['danceability', 'energy', 'valence', 'acousticness']
+available_audio = [col for col in numeric_cols if any(af in col.lower() for af in audio_features)]
+if available_audio:
+    feature = available_audio[0]
+    axes[0,2].hist(df[feature], bins=30, alpha=0.7, color='lightgreen', edgecolor='black')
+    axes[0,2].set_title(f'🎵 {feature.title()} Distribution')
+    axes[0,2].set_xlabel(feature)
+
+# Plot 4: Scatter plot of two features
+if len(numeric_cols) > 1:
+    x_col, y_col = numeric_cols[0], numeric_cols[1]
+    sample_size = min(1000, len(df))
+    sample_df = df.sample(sample_size)
+    axes[1,0].scatter(sample_df[x_col], sample_df[y_col], alpha=0.6, s=20)
+    axes[1,0].set_xlabel(x_col)
+    axes[1,0].set_ylabel(y_col)
+    axes[1,0].set_title(f'📊 {x_col} vs {y_col}')
+
+# Plot 5: Year Distribution
+year_col = get_column_safely(df, ['year', 'release'], numeric_cols)
+if year_col:
+    axes[1,1].hist(df[year_col], bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+    axes[1,1].set_title(f'📅 {year_col.title()} Distribution')
+    axes[1,1].set_xlabel(year_col)
+
+# Plot 6: Duration Distribution
+duration_col = get_column_safely(df, ['duration', 'length', 'time'], numeric_cols)
+if duration_col:
+    duration_data = df[duration_col]
+    if duration_data.mean() > 1000:  # Convert ms to minutes
+        duration_data = duration_data / 60000
+        unit = 'minutes'
+    else:
+        unit = 'seconds'
+    axes[1,2].hist(duration_data, bins=30, alpha=0.7, color='orange', edgecolor='black')
+    axes[1,2].set_title(f'⏱️ Duration Distribution')
+    axes[1,2].set_xlabel(f'Duration ({unit})')
+
+# Plot 7: Key Distribution
+if 'key' in numeric_cols:
+    key_counts = df['key'].value_counts().sort_index()
+    axes[2,0].bar(key_counts.index, key_counts.values, color='purple', alpha=0.7)
+    axes[2,0].set_title('🎼 Musical Key Distribution')
+    axes[2,0].set_xlabel('Key')
+
+# Plot 8: Audio Features Box Plot
+if len(available_audio) > 1:
+    audio_data = df[available_audio[:4]]  # Max 4 features
+    axes[2,1].boxplot([audio_data[col].dropna() for col in audio_data.columns],
+                      labels=audio_data.columns)
+    axes[2,1].set_title('🎵 Audio Features Comparison')
+    axes[2,1].tick_params(axis='x', rotation=45)
+
+# Plot 9: Correlation Heatmap
+corr_cols = numeric_cols[:8] if len(numeric_cols) > 8 else numeric_cols
+if len(corr_cols) > 2:
+    corr_matrix = df[corr_cols].corr()
+    sns.heatmap(corr_matrix, annot=True, cmap='RdYlBu_r', center=0,
+                square=True, ax=axes[2,2], fmt='.2f', cbar_kws={'shrink': 0.8})
+    axes[2,2].set_title('🔥 Feature Correlations')
+
+# Hide empty plots
+for i in range(9):
+    row, col = divmod(i, 3)
+    if len(axes[row, col].get_children()) == 0:
+        axes[row, col].set_visible(False)
+
+plt.tight_layout()
+plt.show()
+
+# ===============================
+# 🧹 STEP 4: DATA PREPROCESSING
+# ===============================
+
+print(f"\n" + "="*60)
+print(f"🧹 DATA PREPROCESSING")
+print(f"="*60)
+
+# Create a copy for preprocessing
+df_processed = df.copy()
+
+# Handle missing values
+print(f"🔧 Handling missing values...")
+for col in numeric_cols:
+    if df_processed[col].isnull().sum() > 0:
+        median_val = df_processed[col].median()
+        df_processed[col].fillna(median_val, inplace=True)
+        print(f"• Filled {col} with median: {median_val:.2f}")
+
+for col in categorical_cols:
+    if df_processed[col].isnull().sum() > 0:
+        mode_val = df_processed[col].mode()[0] if not df_processed[col].mode().empty else 'Unknown'
+        df_processed[col].fillna(mode_val, inplace=True)
+        print(f"• Filled {col} with mode: {mode_val}")
+
+# Remove duplicates
+initial_rows = len(df_processed)
+df_processed = df_processed.drop_duplicates()
+removed_duplicates = initial_rows - len(df_processed)
+if removed_duplicates > 0:
+    print(f"🗑️ Removed {removed_duplicates} duplicate rows")
+
+# Handle outliers
+print(f"\n🎯 Handling outliers...")
+from scipy import stats
+
+# Remove extreme outliers (beyond 3 standard deviations)
+if len(numeric_cols) > 1:
+    numeric_data = df_processed[numeric_cols]
+    z_scores = np.abs(stats.zscore(numeric_data))
+    outlier_mask = (z_scores < 3).all(axis=1)
+
+    df_clean = df_processed[outlier_mask].copy()
+    removed_outliers = len(df_processed) - len(df_clean)
+
+    print(f"🧹 Removed {removed_outliers} outlier rows")
+else:
+    df_clean = df_processed.copy()
+
+print(f"✅ Final dataset size: {len(df_clean)} rows")
+
+# ===============================
+# 🎯 STEP 5: FEATURE ENGINEERING
+# ===============================
+
+print(f"\n" + "="*60)
+print(f"🎯 ADVANCED FEATURE ENGINEERING")
+print(f"="*60)
+
+# Update numeric columns after cleaning
+numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
+print(f"📊 Working with {len(numeric_cols)} numeric features")
+
+feature_count = len(numeric_cols)
+
+# Create interaction features (if audio features exist)
+if 'danceability' in numeric_cols and 'energy' in numeric_cols:
+    df_clean['dance_energy'] = df_clean['danceability'] * df_clean['energy']
+    print("✅ Created dance_energy interaction")
+
+if 'valence' in numeric_cols and 'energy' in numeric_cols:
+    df_clean['valence_energy'] = df_clean['valence'] * df_clean['energy']
+    print("✅ Created valence_energy interaction")
+
+if 'acousticness' in numeric_cols and 'instrumentalness' in numeric_cols:
+    df_clean['acoustic_instrumental'] = df_clean['acousticness'] * df_clean['instrumentalness']
+    print("✅ Created acoustic_instrumental interaction")
+
+# Tempo categories
+tempo_col = get_column_safely(df_clean, ['tempo'], numeric_cols)
+if tempo_col:
+    df_clean['tempo_slow'] = (df_clean[tempo_col] < 90).astype(int)
+    df_clean['tempo_moderate'] = ((df_clean[tempo_col] >= 90) & (df_clean[tempo_col] < 140)).astype(int)
+    df_clean['tempo_fast'] = (df_clean[tempo_col] >= 140).astype(int)
+    print("✅ Created tempo categories")
+
+# Duration categories
+duration_col = get_column_safely(df_clean, ['duration'], numeric_cols)
+if duration_col:
+    q1, q3 = df_clean[duration_col].quantile([0.25, 0.75])
+    df_clean['duration_short'] = (df_clean[duration_col] < q1).astype(int)
+    df_clean['duration_medium'] = ((df_clean[duration_col] >= q1) & (df_clean[duration_col] < q3)).astype(int)
+    df_clean['duration_long'] = (df_clean[duration_col] >= q3).astype(int)
+    print("✅ Created duration categories")
+
+# Update numeric columns after feature engineering
+new_numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
+new_features = len(new_numeric_cols) - feature_count
+print(f"🚀 Added {new_features} new engineered features")
+print(f"📊 Total features now: {len(new_numeric_cols)}")
+
+# ===============================
+# 🤖 STEP 6: MACHINE LEARNING PIPELINE
+# ===============================
+
+print(f"\n" + "="*60)
+print(f"🤖 MACHINE LEARNING PIPELINE")
+print(f"="*60)
+
+# Find target variable
+target_keywords = ['popular', 'stream', 'chart', 'rank', 'play', 'hit']
+target_col = None
+
+for keyword in target_keywords:
+    for col in new_numeric_cols:
+        if keyword in col.lower():
+            target_col = col
+            break
+    if target_col:
+        break
+
+if not target_col and len(new_numeric_cols) > 5:
+    # Use the first column as target if no obvious target found
+    target_col = new_numeric_cols[0]
+    print(f"⚠️ No obvious target found, using {target_col} as target")
+
+if target_col:
+    print(f"🎯 Target variable: {target_col}")
+
+    # Prepare features and target
+    feature_cols = [col for col in new_numeric_cols if col != target_col]
+    X = df_clean[feature_cols].copy()
+    y = df_clean[target_col].copy()
+
+    print(f"📊 Features: {len(feature_cols)}")
+    print(f"📊 Target range: {y.min():.2f} - {y.max():.2f}")
+    print(f"📊 Dataset size: {len(X)} samples")
+
+    # Feature Selection
+    print(f"\n🎯 Intelligent Feature Selection...")
+    k_features = min(15, len(feature_cols))
+    selector = SelectKBest(score_func=f_regression, k=k_features)
+    X_selected = selector.fit_transform(X, y)
+
+    selected_features = [feature_cols[i] for i in range(len(feature_cols)) if selector.get_support()[i]]
+
+    print(f"✅ Selected {len(selected_features)} most important features:")
+    feature_scores = selector.scores_[selector.get_support()]
+    for feature, score in zip(selected_features[:5], feature_scores[:5]):  # Show top 5
+        print(f"  • {feature}: {score:.2f}")
+
+    # Feature Scaling
+    print(f"\n📏 Feature Scaling...")
+    scaler = RobustScaler()
+    X_scaled = scaler.fit_transform(X_selected)
+
+    # Train-Test Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42
+    )
+
+    print(f"🔄 Data split:")
+    print(f"  • Training: {len(X_train)} samples")
+    print(f"  • Testing: {len(X_test)} samples")
+
+    # Model Training
+    print(f"\n🚀 Model Training...")
+
+    # Use simpler grid for faster execution
+    models = {
+        'Random Forest': RandomForestRegressor(random_state=42, n_jobs=-1),
+        'Gradient Boosting': GradientBoostingRegressor(random_state=42)
+    }
+
+    param_grids = {
+        'Random Forest': {
+            'n_estimators': [50, 100],
+            'max_depth': [10, 15],
+            'min_samples_split': [2, 5]
+        },
+        'Gradient Boosting': {
+            'n_estimators': [50, 100],
+            'max_depth': [3, 5],
+            'learning_rate': [0.1, 0.05]
+        }
+    }
+
+    best_models = {}
+    cv_scores = {}
+
+    for model_name in models:
+        print(f"\n🔍 Optimizing {model_name}...")
+
+        grid_search = GridSearchCV(
+            models[model_name],
+            param_grids[model_name],
+            cv=3,  # Reduced CV folds for speed
+            scoring='r2',
+            n_jobs=-1
+        )
+
+        grid_search.fit(X_train, y_train)
+
+        best_models[model_name] = grid_search.best_estimator_
+        cv_scores[model_name] = grid_search.best_score_
+
+        print(f"✅ CV R² for {model_name}: {grid_search.best_score_:.4f}")
+
+    # Select best model
+    best_model_name = max(cv_scores, key=cv_scores.get)
+    final_model = best_models[best_model_name]
+
+    print(f"\n🏆 BEST MODEL: {best_model_name}")
+    print(f"📊 Cross-validation R²: {cv_scores[best_model_name]:.4f}")
+
+    # Final Evaluation
+    print(f"\n📊 FINAL MODEL EVALUATION")
+    print(f"="*40)
+
+    y_pred = final_model.predict(X_test)
+
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+
+    print(f"🎯 FINAL RESULTS:")
+    print(f"• R² Score: {r2:.4f}")
+    print(f"• RMSE: {rmse:.2f}")
+    print(f"• MAE: {mae:.2f}")
+    print(f"• Explained Variance: {r2*100:.1f}%")
+
+    # Performance interpretation
+    if r2 > 0.85:
+        performance = "🌟 EXCELLENT"
+    elif r2 > 0.75:
+        performance = "✨ VERY GOOD"
+    elif r2 > 0.65:
+        performance = "👍 GOOD"
+    elif r2 > 0.5:
+        performance = "👌 FAIR"
+    else:
+        performance = "😐 NEEDS IMPROVEMENT"
+
+    print(f"• Performance Level: {performance}")
+
+    # Feature Importance
+    if hasattr(final_model, 'feature_importances_'):
+        print(f"\n🎯 TOP 10 MOST IMPORTANT FEATURES:")
+        importances = final_model.feature_importances_
+        feature_importance_df = pd.DataFrame({
+            'feature': selected_features,
+            'importance': importances
+        }).sort_values('importance', ascending=False)
+
+        for i, (_, row) in enumerate(feature_importance_df.head(10).iterrows()):
+            print(f"{i+1:2d}. {row['feature']:<25}: {row['importance']:.4f}")
+
+    # Performance Visualizations
+    print(f"\n🎨 Creating performance visualizations...")
+
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    fig.suptitle(f'🚀 Model Performance - {best_model_name} (R² = {r2:.4f})',
+                 fontsize=14, fontweight='bold')
+
+    # Predictions vs Actual
+    axes[0,0].scatter(y_test, y_pred, alpha=0.6, s=30)
+    axes[0,0].plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+    axes[0,0].set_xlabel(f'Actual {target_col}')
+    axes[0,0].set_ylabel(f'Predicted {target_col}')
+    axes[0,0].set_title(f'🎯 Predictions vs Actual')
+
+    # Residuals plot
+    residuals = y_test - y_pred
+    axes[0,1].scatter(y_pred, residuals, alpha=0.6, s=30)
+    axes[0,1].axhline(y=0, color='r', linestyle='--', lw=2)
+    axes[0,1].set_xlabel(f'Predicted {target_col}')
+    axes[0,1].set_ylabel('Residuals')
+    axes[0,1].set_title('📈 Residuals Plot')
+
+    # Feature importance
+    if hasattr(final_model, 'feature_importances_'):
+        top_features = feature_importance_df.head(8)
+        axes[1,0].barh(range(len(top_features)), top_features['importance'])
+        axes[1,0].set_yticks(range(len(top_features)))
+        axes[1,0].set_yticklabels(top_features['feature'])
+        axes[1,0].set_xlabel('Importance')
+        axes[1,0].set_title('🎵 Top Feature Importance')
+        axes[1,0].invert_yaxis()
+
+    # Error distribution
+    axes[1,1].hist(residuals, bins=30, alpha=0.7, color='lightcoral', edgecolor='black')
+    axes[1,1].axvline(x=0, color='r', linestyle='--', lw=2)
+    axes[1,1].set_xlabel('Residuals')
+    axes[1,1].set_ylabel('Frequency')
+    axes[1,1].set_title('📊 Error Distribution')
+
+    plt.tight_layout()
+    plt.show()
+
+    # Key Insights
+    print(f"\n💡 KEY INSIGHTS:")
+    print(f"• Dataset: {len(df_clean)} songs analyzed")
+    print(f"• Best algorithm: {best_model_name}")
+    print(f"• Model accuracy: {r2:.4f} ({performance})")
+    if hasattr(final_model, 'feature_importances_'):
+        top_feature = feature_importance_df.iloc[0]['feature']
+        print(f"• Most predictive feature: {top_feature}")
+
+else:
+    print("❌ No suitable target variable found for prediction")
+    print("Available numeric columns:", new_numeric_cols)
+
